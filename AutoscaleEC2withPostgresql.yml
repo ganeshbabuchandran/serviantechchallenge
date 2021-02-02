@@ -249,9 +249,12 @@
         - Key: CostCenter
           Value: !Ref CostCenter
       DeletionPolicy: Snapshot
+
    #EC2 Instance with high availability    
     WebServerGroup:
       Type: AWS::AutoScaling::AutoScalingGroup
+      DependsOn:
+        - MasterDB
       Properties:
         VPCZoneIdentifier:
         - !Ref PublicSubnetA
@@ -329,6 +332,8 @@
         - Ref: InstanceSecurityGroup
         InstanceType:
           Ref: InstanceType
+          
+        # Install dependencies and setup the applications
         UserData:
           Fn::Base64:
             Fn::Join:
@@ -402,6 +407,22 @@
               - 'cd TechChallengeApp
               
                 '
+			        - "sed  's/postgres/"
+              - !Ref DBUser
+              - " /' conf.toml"
+              - "\n"
+			        - "sed  's/changeme/"
+              - !Ref DBPassword
+              - " /' conf.toml"
+              - "\n"
+			        - "sed  's/app/"
+              - !Ref DBName
+              - " /' conf.toml"
+              - "\n"
+			        - "sed  's/DbHost/"
+              - !GetAtt [MasterDB, Endpoint.Address]  
+              - " /' conf.toml"
+              - "\n"
               - 'docker build . -t servian/techchallengeapp:latest
               
                 '
