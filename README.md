@@ -12,6 +12,8 @@ The applications can be deployed over kubernets or virtual machines with auto sc
 
 ## Infra Architecture
 
+The VPC has public and private subnets which used for placing EC2 instance and Postgres RDS. The EC2 instance deploy using auto scale feature. Both RDS and EC2 instances will be available on two AZs. The application is running behind an application load balancer which checks the application helath frequently and ensure the application health.
+
 ![architecture](img/architecture.png)
 
 ## Deploy Application
