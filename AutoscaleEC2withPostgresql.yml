@@ -1,0 +1,479 @@
+---
+  AWSTemplateFormatVersion: 2010-09-09
+  Description: Creates a VPC with subnet containing EC2 Instance, as well as and RDS Instance that allows traffic from the VPCs default security group
+
+  Parameters:
+    # Operations
+    CostCenter:
+      Default: DevTeam
+      Description: Cost center that assumes financial responsibility for resources provisioned
+      Type: String
+
+    # Networking Parameters  
+    VPCName:
+      Default: dev-vpc
+      Description: The name of the VPC being created.
+      Type: String
+    VPCBase:
+      Default: 192.168
+      Description: First 2 octets of VPC address space
+      Type: String
+
+    # Database parameters
+    DBName:
+      Default: postgresdb
+      Description: The database name
+      Type: String
+      MinLength: 1
+      MaxLength: 64
+    DBUser:
+      Default: postgresusr
+      Description: The database admin account username
+      Type: String
+      MinLength: 1
+      MaxLength: 16
+    DBPassword:
+      Default: postgrespwd
+      NoEcho: true
+      Description: The database admin account password
+      Type: String
+      MinLength: 1
+      MaxLength: 40
+    DBAllocatedStorage:
+      Default: 5
+      Description: The size of the database (Gb)
+      Type: Number
+      MinValue: 5
+      MaxValue: 1024
+      ConstraintDescription: must be between 5 and 1024Gb.
+    DBInstanceClass:
+      Description: The database instance type
+      Type: String
+      Default: db.t2.small
+      AllowedValues: [db.t2.micro, db.t2.small, db.t2.medium, db.t2.large]
+      ConstraintDescription: must select a valid database instance type.
+
+    # EC2 parameters
+    InstanceType:
+      Description: EC2 instance type
+      Type: String
+      Default: t2.small
+      AllowedValues: [t2.nano, t2.micro, t2.small, t2.medium, t2.large, t2.xlarge, t2.2xlarge]
+      ConstraintDescription: must be a valid EC2 instance type.
+    LatestAmiId:
+      Type:  AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+      Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    SSHLocation:
+      Description: The IP address range that can be used to SSH to the EC2 instances
+      Type: String
+      MinLength: 9
+      MaxLength: 18
+      Default: 0.0.0.0/0
+      AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+      ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.  
+    EC2KeyName:
+      Description: The SSH KeyPair to configure the EC2 instance to require
+      Type: String
+      MinLength: 1
+      MaxLength: 32
+      Default: ec2-key
+
+  # Metadata section allows for paramter grouping
+  Metadata: 
+    AWS::CloudFormation::Interface: 
+      ParameterGroups: 
+      - Label: 
+          default: Operations
+        Parameters: 
+        - CostCenter
+      - Label: 
+          default: Network Configuration
+        Parameters: 
+        - VPCName
+        - VPCBase
+      - Label: 
+          default: RDS Configuration
+        Parameters: 
+        - DBName
+        - DBUser
+        - DBPassword
+        - DBAllocatedStorage
+        - DBInstanceClass
+      - Label: 
+          default: EC2 Configuration
+        Parameters: 
+        - InstanceType
+        - LatestAmiId
+        - SSHLocation
+        - EC2KeyName
+      
+  Resources:
+    # Networking
+    VPC:
+      Type: AWS::EC2::VPC
+      Properties:
+        EnableDnsSupport: true
+        EnableDnsHostnames: true
+        CidrBlock: !Sub ${VPCBase}.0.0/16
+        Tags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+
+    PublicSubnetA:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref VPC
+        AvailabilityZone: !Sub ${AWS::Region}a
+        CidrBlock: !Sub ${VPCBase}.1.0/25
+        MapPublicIpOnLaunch: true
+        Tags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+
+    PublicSubnetB:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref VPC
+        AvailabilityZone: !Sub ${AWS::Region}b
+        CidrBlock: !Sub ${VPCBase}.2.0/25
+        MapPublicIpOnLaunch: true
+        Tags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+
+    PrivateSubnetA:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref VPC
+        AvailabilityZone: !Sub ${AWS::Region}a
+        CidrBlock: !Sub ${VPCBase}.3.0/26
+        MapPublicIpOnLaunch: false
+        Tags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+
+    PrivateSubnetB:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref VPC
+        AvailabilityZone: !Sub ${AWS::Region}b
+        CidrBlock: !Sub ${VPCBase}.4.0/26
+        MapPublicIpOnLaunch: false
+        Tags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+
+    InternetGateway:
+      Type: AWS::EC2::InternetGateway
+      Properties:
+        Tags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+
+    VPCRouteTable:
+      Type: AWS::EC2::RouteTable
+      Properties:
+        VpcId: !Ref VPC
+        Tags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+
+    InternetGatewayAttachement:
+      Type: AWS::EC2::VPCGatewayAttachment
+      Properties:
+        VpcId: !Ref VPC
+        InternetGatewayId: !Ref InternetGateway
+    
+    PublicSubnetARouteTableAssociation:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        RouteTableId: !Ref VPCRouteTable
+        SubnetId: !Ref PublicSubnetA
+
+    PublicSubnetBRouteTableAssociation:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        RouteTableId: !Ref VPCRouteTable
+        SubnetId: !Ref PublicSubnetB
+
+    VPCPublicDefaultRoute:
+      Type: AWS::EC2::Route
+      Properties:
+        DestinationCidrBlock: 0.0.0.0/0
+        RouteTableId: !Ref VPCRouteTable
+        GatewayId: !Ref InternetGateway
+
+    # Database 
+    DBSubnetGroup:
+      Type: AWS::RDS::DBSubnetGroup
+      Properties: 
+        DBSubnetGroupDescription: !Sub ${AWS::StackName}-rds-subnet-group
+        SubnetIds: 
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+        Tags: 
+        - Key: CostCenter
+          Value: !Ref CostCenter
+
+    DBEC2SecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Open database for access
+        VpcId:
+          Ref: VPC
+        SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !GetAtt [InstanceSecurityGroup, GroupId]
+        Tags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+    
+    MasterDB:
+      Type: AWS::RDS::DBInstance
+      Properties:
+        DBName: !Ref DBName
+        AllocatedStorage: !Ref DBAllocatedStorage
+        DBInstanceClass: !Ref DBInstanceClass
+        Engine: postgres
+        EngineVersion: 9.6.3
+        MasterUsername: !Ref DBUser
+        MasterUserPassword: !Ref DBPassword
+        MultiAZ: false
+        DBSubnetGroupName: !Ref DBSubnetGroup
+        VPCSecurityGroups: 
+        - !Ref DBEC2SecurityGroup
+        StorageEncrypted: true
+        Tags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+      DeletionPolicy: Snapshot
+   #EC2 Instance with high availability    
+    WebServerGroup:
+      Type: AWS::AutoScaling::AutoScalingGroup
+      Properties:
+        VPCZoneIdentifier:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+        LaunchConfigurationName:
+          Ref: LaunchConfig
+        MinSize: '1'
+        MaxSize: '2'
+        TargetGroupARNs:
+        - Ref: ALBTargetGroup
+        Tags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+          PropagateAtLaunch: true
+    LaunchConfig:
+      Type: AWS::AutoScaling::LaunchConfiguration
+      Metadata:
+        Comment: Install a simple application
+        AWS::CloudFormation::Init:
+          config:
+            packages:
+              yum:
+                httpd: []
+            files:
+              "/etc/cfn/cfn-hup.conf":
+                content:
+                  Fn::Join:
+                  - ''
+                  - - "[main]\n"
+                    - stack=
+                    - Ref: AWS::StackId
+                    - "\n"
+                    - region=
+                    - Ref: AWS::Region
+                    - "\n"
+                mode: '000400'
+                owner: root
+                group: root
+              "/etc/cfn/hooks.d/cfn-auto-reloader.conf":
+                content:
+                  Fn::Join:
+                  - ''
+                  - - "[cfn-auto-reloader-hook]\n"
+                    - 'triggers=post.update
+
+                      '
+                    - 'path=Resources.LaunchConfig.Metadata.AWS::CloudFormation::Init
+
+                      '
+                    - 'action=/opt/aws/bin/cfn-init -v '
+                    - "         --stack "
+                    - Ref: AWS::StackName
+                    - "         --resource LaunchConfig "
+                    - "         --region "
+                    - Ref: AWS::Region
+                    - "\n"
+                    - 'runas=root
+
+                      '
+            services:
+              sysvinit:
+                httpd:
+                  enabled: 'true'
+                  ensureRunning: 'true'
+                cfn-hup:
+                  enabled: 'true'
+                  ensureRunning: 'true'
+                  files:
+                  - "/etc/cfn/cfn-hup.conf"
+                  - "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
+      Properties:
+        KeyName: !Ref EC2KeyName
+        ImageId: !Ref LatestAmiId
+        SecurityGroups:
+        - Ref: InstanceSecurityGroup
+        InstanceType:
+          Ref: InstanceType
+        UserData:
+          Fn::Base64:
+            Fn::Join:
+            - ''
+            - - "#!/bin/bash -xe\n"
+              - 'echo "Started bootstrap"
+              
+                '
+              - 'yum update -y aws-cfn-bootstrap
+
+                '
+              - "/opt/aws/bin/cfn-init -v "
+              - "         --stack "
+              - Ref: AWS::StackName
+              - "         --resource LaunchConfig "
+              - "         --region "
+              - Ref: AWS::Region
+              - "\n"
+              - "/opt/aws/bin/cfn-signal -e $? "
+              - "         --stack "
+              - Ref: AWS::StackName
+              - "         --resource WebServerGroup "
+              - "         --region "
+              - Ref: AWS::Region
+              - "\n"
+              - 'echo "Golang installation initiated"
+              
+                '
+              - 'sudo wget https://dl.google.com/go/go1.13.4.linux-amd64.tar.gz
+
+                '
+              - 'sudo tar -C /usr/local -xzf go1.13.4.linux-amd64.tar.gz
+              
+                '
+              - 'export PATH="$PATH:/usr/local/go/bin"
+              
+                '
+              - 'export GOBIN="/usr/local/go/bin"
+              
+                '
+              -  'source ~/.bash_profile
+              
+                '
+              -  'sudo curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
+              
+                '
+              -  'sudo yum update -y
+              
+                '
+              - 'echo "Docker installation initiated"
+              
+                '
+              -  'sudo amazon-linux-extras install docker -y
+              
+                '
+              -  'sudo service docker start
+              
+                '
+              -  'sudo usermod -a -G docker ec2-user
+              
+                '
+              -  'yum install git -y
+              
+                '
+              - 'cd ~
+              
+                '
+              - 'git clone https://github.com/servian/TechChallengeApp.git
+              
+                '
+              - 'cd TechChallengeApp
+              
+                '
+              - 'docker build . -t servian/techchallengeapp:latest
+              
+                '
+              - 'docker run  -d servian/techchallengeapp updatedb -s
+              
+                '
+              - 'docker run  -d servian/techchallengeapp serve
+              
+                '
+              - 'docker run -p 80:80 -d nginx
+                            
+                '
+              - 'echo "End bootstrap"
+              
+                '
+    ApplicationLoadBalancer:
+      Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+      Properties:
+        Subnets:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+        SecurityGroups:
+        - Ref: InstanceSecurityGroup
+    ALBListener:
+      Type: AWS::ElasticLoadBalancingV2::Listener
+      Properties:
+        DefaultActions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: ALBTargetGroup
+        LoadBalancerArn:
+          Ref: ApplicationLoadBalancer
+        Port: '80'
+        Protocol: HTTP
+    ALBTargetGroup:
+      Type: AWS::ElasticLoadBalancingV2::TargetGroup
+      Properties:
+        HealthCheckIntervalSeconds: 30
+        HealthCheckTimeoutSeconds: 5
+        HealthyThresholdCount: 3
+        Port: 80
+        Protocol: HTTP
+        UnhealthyThresholdCount: 5
+        VpcId: !Ref VPC
+    InstanceSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Enable SSH access and HTTP access on the configured port
+        SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp:
+            Ref: SSHLocation
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+        VpcId: !Ref VPC
+  Outputs:
+    # RDS
+    MasterRDSEndpoint:
+      Description: RDS Endpoint address
+      Value: !GetAtt [MasterDB, Endpoint.Address]    
+    
+    #ALB URL
+    URL:
+      Description: URL of the website
+      Value:
+        Fn::Join:
+        - ''
+        - - http://
+          - Fn::GetAtt:
+            - ApplicationLoadBalancer
+            - DNSName
